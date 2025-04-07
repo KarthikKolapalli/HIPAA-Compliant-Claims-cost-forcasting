@@ -20,6 +20,7 @@
 # ───────────────────────────────
 # 📄 etl/process_claims.py
 # ───────────────────────────────
+
 import hashlib
 import csv
 import pyodbc
@@ -31,7 +32,6 @@ def hash_id(value):
 def process_claims(blob_bytes):
     decoded = blob_bytes.decode('utf-8').splitlines()
     reader = csv.DictReader(decoded)
-
     rows = []
     for row in reader:
         rows.append((
@@ -61,6 +61,7 @@ def upload_to_sql(rows):
 # ───────────────────────────────
 # 📄 sql/claims_schema.sql
 # ───────────────────────────────
+
 CREATE TABLE claims (
     claim_id INT IDENTITY PRIMARY KEY,
     patient_id VARCHAR(64),
