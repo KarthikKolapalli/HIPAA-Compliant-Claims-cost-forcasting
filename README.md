@@ -20,96 +20,95 @@
 # ───────────────────────────────
 # 📄 etl/process_claims.py
 # ───────────────────────────────
+    import hashlib
+    import csv
+    import pyodbc
+    import os
+    
+    def hash_id(value):
+        return hashlib.sha256(value.encode()).hexdigest()
+    
+    def process_claims(blob_bytes):
+        decoded = blob_bytes.decode('utf-8').splitlines()
+        reader = csv.DictReader(decoded)
 
-import hashlib
-import csv
-import pyodbc
-import os
-
-def hash_id(value):
-    return hashlib.sha256(value.encode()).hexdigest()
-
-def process_claims(blob_bytes):
-    decoded = blob_bytes.decode('utf-8').splitlines()
-    reader = csv.DictReader(decoded)
-    rows = []
-    for row in reader:
-        rows.append((
-            hash_id(row['patient_id']),
-            row['procedure_code'],
-            row['diagnosis_code'],
-            row['date_of_service'],
-            row['provider_id'],
-            row['payer'],
-            float(row['total_billed']),
-            float(row['amount_paid']),
-            row['status']
-        ))
-    return rows
-
-def upload_to_sql(rows):
-    conn = pyodbc.connect(os.getenv('SQL_CONN_STR'))
-    cursor = conn.cursor()
-    for r in rows:
-        cursor.execute("""
-            INSERT INTO claims
-            (patient_id, procedure_code, diagnosis_code, date_of_service, provider_id, payer, total_billed, amount_paid, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, r)
-    conn.commit()
+        rows = []
+        for row in reader:
+            rows.append((
+                hash_id(row['patient_id']),
+                row['procedure_code'],
+                row['diagnosis_code'],
+                row['date_of_service'],
+                row['provider_id'],
+                row['payer'],
+                float(row['total_billed']),
+                float(row['amount_paid']),
+                row['status']
+            ))
+        return rows
+    
+    def upload_to_sql(rows):
+        conn = pyodbc.connect(os.getenv('SQL_CONN_STR'))
+        cursor = conn.cursor()
+        for r in rows:
+            cursor.execute("""
+                INSERT INTO claims
+                (patient_id, procedure_code, diagnosis_code, date_of_service, provider_id, payer, total_billed, amount_paid, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, r)
+        conn.commit()
 
 # ───────────────────────────────
 # 📄 sql/claims_schema.sql
 # ───────────────────────────────
-
-CREATE TABLE claims (
-    claim_id INT IDENTITY PRIMARY KEY,
-    patient_id VARCHAR(64),
-    procedure_code VARCHAR(10),
-    diagnosis_code VARCHAR(10),
-    date_of_service DATE,
-    provider_id VARCHAR(20),
-    payer VARCHAR(50),
-    total_billed DECIMAL(10,2),
-    amount_paid DECIMAL(10,2),
-    status VARCHAR(20)
-);
-
--- Monthly aggregation view
-CREATE VIEW monthly_paid AS
-SELECT 
-    FORMAT(date_of_service, 'yyyy-MM') AS month,
-    SUM(amount_paid) AS total_paid
-FROM claims
-WHERE status = 'Paid'
-GROUP BY FORMAT(date_of_service, 'yyyy-MM');
+    CREATE TABLE claims (
+        claim_id INT IDENTITY PRIMARY KEY,
+        patient_id VARCHAR(64),
+        procedure_code VARCHAR(10),
+        diagnosis_code VARCHAR(10),
+        date_of_service DATE,
+        provider_id VARCHAR(20),
+        payer VARCHAR(50),
+        total_billed DECIMAL(10,2),
+        amount_paid DECIMAL(10,2),
+        status VARCHAR(20)
+    );
+    
+    -- Monthly aggregation view
+    CREATE VIEW monthly_paid AS
+    SELECT 
+        FORMAT(date_of_service, 'yyyy-MM') AS month,
+        SUM(amount_paid) AS total_paid
+    FROM claims
+    WHERE status = 'Paid'
+    GROUP BY FORMAT(date_of_service, 'yyyy-MM');
 
 # ───────────────────────────────
 # 📄 forecasting/forecast_claims.py
 # ───────────────────────────────
-import pandas as pd
-from prophet import Prophet
-import matplotlib.pyplot as plt
-
-# Load from SQL export
-df = pd.read_csv('monthly_paid.csv')
-df.rename(columns={"month": "ds", "total_paid": "y"}, inplace=True)
-
-model = Prophet()
-model.fit(df)
-
-future = model.make_future_dataframe(periods=6, freq='M')
-forecast = model.predict(future)
-
-model.plot(forecast)
-plt.title('Forecasted Claim Payouts')
-plt.xlabel('Month')
-plt.ylabel('Total Paid')
-plt.tight_layout()
-plt.show()
-
-# Save to CSV
-forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].to_csv('forecast_output.csv', index=False)
+    import pandas as pd
+    from prophet import Prophet
+    import matplotlib.pyplot as plt
+    
+    # Load from SQL export
+    df = pd.read_csv('monthly_paid.csv')
+    df.rename(columns={"month": "ds", "total_paid": "y"}, inplace=True)
+    
+    model = Prophet()
+    model.fit(df)
+    
+    future = model.make_future_dataframe(periods=6, freq='M')
+    forecast = model.predict(future)
+    
+    model.plot(forecast)
+    plt.title('Forecasted Claim Payouts')
+    plt.xlabel('Month')
+    plt.ylabel('Total Paid')
+    plt.tight_layout()
+    plt.show()
+    
+    # Save to CSV
+    forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].to_csv('forecast_output.csv', index=False)
 
 # ───────────────────────────────
 # 📄 README.md (Summary)
